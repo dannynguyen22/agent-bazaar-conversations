@@ -1,6 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AGENTS, LISTINGS, agentById, search, script, type Listing, type Msg } from "@/lib/market-data";
+import { STRIKE_LIMIT, addStrike, detectBluff, getVet, submitDocs, useVet } from "@/lib/vetting";
+
+function Badge({ id }: { id: string }) {
+  const v = useVet()[id];
+  if (!v) return null;
+  const [label, cls] = v.banned ? ["banned", "bg-destructive text-destructive-foreground"]
+    : v.status === "verified" ? ["✓ verified", "bg-accent text-accent-foreground"]
+    : v.status === "pending" ? ["reviewing…", "bg-secondary text-secondary-foreground"]
+    : v.status === "rejected" ? ["rejected", "bg-destructive text-destructive-foreground"]
+    : ["unverified", "bg-signal text-signal-foreground"];
+  return <span className={`px-1.5 py-0.5 font-mono text-[10px] uppercase ${cls}`}>{label}</span>;
+}
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -77,7 +89,7 @@ function Login({ onIn }: { onIn: (s: Session) => void }) {
 }
 
 function Market({ session, onOut }: { session: Session; onOut: () => void }) {
-  const [mode, setMode] = useState<"buy" | "sell">("buy");
+  const [mode, setMode] = useState<"buy" | "sell" | "vet">("buy");
   const [listings, setListings] = useState<Listing[]>(LISTINGS);
   return (
     <div className="min-h-screen">
@@ -85,9 +97,9 @@ function Market({ session, onOut }: { session: Session; onOut: () => void }) {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
           <Logo />
           <div className="flex border border-foreground font-mono text-xs">
-            {(["buy", "sell"] as const).map((m) => (
+            {(["buy", "sell", "vet"] as const).map((m) => (
               <button key={m} onClick={() => setMode(m)} className={`px-4 py-1.5 ${mode === m ? "bg-primary text-primary-foreground" : ""}`}>
-                {m === "buy" ? "Consumer" : "Merchant"}
+                {m === "buy" ? "Consumer" : m === "sell" ? "Merchant" : "Vetting"}
               </button>
             ))}
           </div>
@@ -98,7 +110,7 @@ function Market({ session, onOut }: { session: Session; onOut: () => void }) {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {mode === "buy" ? <Buy session={session} listings={listings} /> : <Sell session={session} listings={listings} setListings={setListings} />}
+        {mode === "buy" ? <Buy session={session} listings={listings} /> : mode === "sell" ? <Sell session={session} listings={listings} setListings={setListings} /> : <Vetting />}
       </main>
     </div>
   );
@@ -108,7 +120,8 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
   const [q, setQ] = useState("buy me a black cap");
   const [ran, setRan] = useState(q);
   const [chat, setChat] = useState<Listing | null>(null);
-  const results = search(ran, listings);
+  const vet = useVet();
+  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (l.agentId !== "me" || vet["me"]?.status === "verified"));
   if (chat) return <Chat session={session} listing={chat} back={() => setChat(null)} />;
   return (
     <div>
@@ -125,7 +138,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
             <article key={l.id} style={{ animationDelay: `${i * 60}ms` }} className="animate-rise border border-foreground bg-card p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <span className="font-mono text-xs text-muted-foreground">{l.kind} · {a.handle}</span>
+                  <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">{l.kind} · {a.handle} <Badge id={a.id} /></span>
                   <h3 className="mt-1 text-xl font-semibold">{l.title}</h3>
                 </div>
                 <span className="font-mono text-lg font-semibold">{l.price}</span>
@@ -153,6 +166,28 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   const [draft, setDraft] = useState("");
   const [done, setDone] = useState(false);
   const end = useRef<HTMLDivElement>(null);
+  const [flagged, setFlagged] = useState(false);
+  const vet = useVet()[a.id];
+
+  /** Runs the vetting engine on a seller message. Returns true if the channel was closed by a ban. */
+  const vetCheck = (text: string) => {
+    const reason = detectBluff(text, listing.price);
+    if (!reason) return false;
+    setFlagged(true);
+    const banned = addStrike(a.id, reason);
+    const s = getVet(a.id)!.strikes;
+    setMsgs((m) => [...m, { from: "system", text: `⚠ Vetting engine: ${reason}. Strike ${s}/${STRIKE_LIMIT}.` },
+      ...(banned ? [{ from: "system" as const, text: `⛔ ${a.handle} has been BANNED from Agora. Channel terminated.` }] : [])]);
+    if (banned) setDone(true);
+    return banned;
+  };
+  const report = () => {
+    setFlagged(true);
+    const banned = addStrike(a.id, "reported by buyer for misleading claims");
+    setMsgs((m) => [...m, { from: "system", text: `Report filed. Strike ${getVet(a.id)!.strikes}/${STRIKE_LIMIT}.` },
+      ...(banned ? [{ from: "system" as const, text: `⛔ ${a.handle} has been BANNED.` }] : [])]);
+    setDone(true);
+  };
 
   useEffect(() => {
     if (!auto) {
@@ -164,7 +199,12 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     const step = () => {
       if (i >= full.length) { setTyping(false); setDone(true); return; }
       setTyping(true);
-      t = setTimeout(() => { const next = full[i++] as Msg; setMsgs((m) => [...m, next]); step(); }, 1100);
+      t = setTimeout(() => {
+        const next = full[i++] as Msg;
+        setMsgs((m) => [...m, next]);
+        if (next.from === "seller" && vetCheck(next.text)) { setTyping(false); return; }
+        step();
+      }, 1100);
     };
     step();
     return () => clearTimeout(t);
@@ -181,7 +221,9 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     const replies = [full[1].text, full[3].text, "Great — terms locked. Here's your handoff link."];
     setTimeout(() => {
       setTyping(false);
-      setMsgs((m) => [...m, { from: "seller", text: replies[Math.min(turn, 2)] ?? "" }]);
+      const text = replies[Math.min(turn, 2)] ?? "";
+      setMsgs((m) => [...m, { from: "seller", text }]);
+      if (vetCheck(text)) return;
       if (turn >= 2) { setMsgs((m) => [...m, full[5]]); setDone(true); }
     }, 1000);
   };
@@ -192,7 +234,10 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
         <div className="flex items-center justify-between border-b border-foreground px-4 py-3 font-mono text-xs">
           <button onClick={back} className="underline">← results</button>
           <span>channel: {session.name} ⇄ {a.handle}</span>
-          <span className="text-signal">● {done ? "closed" : "live"}</span>
+          <span className="flex items-center gap-3">
+            {!done && <button onClick={report} className="text-destructive underline">report bluff</button>}
+            <span className="text-signal">● {done ? "closed" : "live"}</span>
+          </span>
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {msgs.map((m, i) => m.from === "system" ? (
@@ -206,7 +251,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
             </div>
           ))}
           {typing && <p className="font-mono text-xs text-muted-foreground">agent composing<span className="animate-blink">_</span></p>}
-          {done && (
+          {done && !flagged && (
             <a href={a.website} target="_blank" rel="noreferrer" className="animate-rise block bg-signal p-4 text-center font-mono font-semibold text-signal-foreground">
               Continue on {a.company} → {a.website.replace("https://", "")}
             </a>
@@ -226,6 +271,8 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
         <p className="font-mono text-xs">{a.handle}</p>
         <p className="mt-3 text-sm text-muted-foreground">{a.about}</p>
         <dl className="mt-4 space-y-2 font-mono text-xs">
+          <div className="flex justify-between"><dt>vetting</dt><dd><Badge id={a.id} /></dd></div>
+          <div className="flex justify-between"><dt>strikes</dt><dd className={vet && vet.strikes ? "text-destructive" : ""}>{vet?.strikes ?? 0}/{STRIKE_LIMIT}</dd></div>
           <div className="flex justify-between"><dt>trust</dt><dd>{a.trust}/100</dd></div>
           <div className="flex justify-between"><dt>deals</dt><dd>{a.deals.toLocaleString()}</dd></div>
           <div><dt>transacts via</dt><dd className="mt-1 text-foreground">{a.transact}</dd></div>
@@ -250,6 +297,8 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
   };
   const input = "w-full border border-input bg-background px-3 py-2 text-sm outline-none focus:border-signal";
   return (
+    <div className="space-y-6">
+    <Kyb />
     <div className="grid gap-6 md:grid-cols-[360px_1fr]">
       <form onSubmit={add} className="h-fit space-y-3 border border-foreground bg-card p-5 shadow-[6px_6px_0_0_var(--foreground)]">
         <p className="font-mono text-xs uppercase text-muted-foreground">New listing</p>
@@ -275,6 +324,66 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
           {!mine.length && <p className="border border-dashed p-6 font-mono text-sm text-muted-foreground">Nothing listed yet. Add something, then switch to Consumer and search for it.</p>}
         </div>
       </section>
+    </div>
+    </div>
+  );
+}
+
+function Kyb() {
+  const v = useVet()["me"]!;
+  const [doc, setDoc] = useState("");
+  const [lic, setLic] = useState("");
+  if (v.status === "verified") return <p className="border border-foreground bg-accent p-4 font-mono text-sm text-accent-foreground">✓ Business verified. Your listings are visible to buyer agents.</p>;
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (doc) submitDocs("me", doc, lic); }} className="border-2 border-signal bg-card p-5">
+      <div className="flex items-center justify-between">
+        <p className="font-semibold">Verify your business to go live</p><Badge id="me" />
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">Listings stay hidden from buyers until the vetting engine verifies your commercial licence.</p>
+      {v.status === "pending" ? (
+        <p className="mt-4 font-mono text-sm">Checking registry, document authenticity and name match<span className="animate-blink">_</span></p>
+      ) : (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <input type="file" accept=".pdf,image/*" onChange={(e) => setDoc(e.target.files?.[0]?.name ?? "")} className="flex-1 border border-input bg-background px-3 py-2 font-mono text-xs" />
+          <input value={lic} onChange={(e) => setLic(e.target.value)} placeholder="Licence / registration no." className="flex-1 border border-input bg-background px-3 py-2 text-sm outline-none focus:border-signal" />
+          <button disabled={!doc} className="bg-signal px-5 font-mono text-sm font-semibold text-signal-foreground disabled:opacity-40">Submit</button>
+        </div>
+      )}
+      {v.status === "rejected" && <p className="mt-2 font-mono text-xs text-destructive">{v.log.at(-1)} — try again.</p>}
+    </form>
+  );
+}
+
+function Vetting() {
+  const vet = useVet();
+  const rows = AGENTS.filter((a) => vet[a.id]);
+  return (
+    <div>
+      <h2 className="text-3xl font-bold">Vetting engine</h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+        Merchants must submit a commercial licence before listing. Every seller message is scanned for bluffs
+        (prices that contradict the listing, unverifiable claims). {STRIKE_LIMIT} strikes = automatic ban.
+      </p>
+      <div className="mt-6 overflow-x-auto border border-foreground bg-card">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-foreground font-mono text-xs uppercase text-muted-foreground">
+            <tr><th className="p-3">Agent</th><th className="p-3">Status</th><th className="p-3">Strikes</th><th className="p-3">Latest event</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((a) => { const v = vet[a.id]!; return (
+              <tr key={a.id} className={`border-b last:border-0 ${v.banned ? "bg-muted" : ""}`}>
+                <td className="p-3"><p className="font-semibold">{a.company}</p><p className="font-mono text-xs text-muted-foreground">{a.handle}</p></td>
+                <td className="p-3"><Badge id={a.id} /></td>
+                <td className="p-3 font-mono">
+                  <span className="flex gap-1">{Array.from({ length: STRIKE_LIMIT }, (_, i) => <span key={i} className={`h-2.5 w-5 ${i < v.strikes ? "bg-destructive" : "bg-secondary"}`} />)}</span>
+                </td>
+                <td className="p-3 font-mono text-xs">{v.log.at(-1) ?? "—"}</td>
+              </tr>
+            ); })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 font-mono text-xs text-muted-foreground">Tip: search "cap" and open @cheapdeals.bot to watch a ban happen live.</p>
     </div>
   );
 }
