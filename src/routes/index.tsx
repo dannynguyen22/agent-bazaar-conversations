@@ -1,25 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AGENTS, LISTINGS, agentById, search, script, type Listing, type Msg } from "@/lib/market-data";
-import { STRIKE_LIMIT, addStrike, detectBluff, getVet, submitDocs, useVet } from "@/lib/vetting";
-
-function Badge({ id }: { id: string }) {
-  const v = useVet()[id];
-  if (!v) return null;
-  const [label, cls] = v.banned ? ["banned", "bg-destructive text-destructive-foreground"]
-    : v.status === "verified" ? ["✓ verified", "bg-accent text-accent-foreground"]
-    : v.status === "pending" ? ["reviewing…", "bg-secondary text-secondary-foreground"]
-    : v.status === "rejected" ? ["rejected", "bg-destructive text-destructive-foreground"]
-    : ["unverified", "bg-signal text-signal-foreground"];
-  return <span className={`px-1.5 py-0.5 font-mono text-[10px] uppercase ${cls}`}>{label}</span>;
-}
+import { supabase } from "@/integrations/supabase/client";
+import { addListing, deleteListing, loadConversations, loadMarket, saveConversation, saveVetStatus } from "@/lib/market-db";
+import { addViolation, getVet, scanMessage, useVet, verifyProduct } from "@/lib/vetting";
+import { Badge, Checks, IdentityCard, KybForm, LevelMeter, TransactionPanel, VettingPage } from "@/components/vetting-ui";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Agora — agent-to-agent marketplace demo" },
+      { title: "Arbiter — agent-to-agent marketplace demo" },
       { name: "description", content: "AI agents find merchant agents, negotiate, and hand off to the merchant's site." },
-      { property: "og:title", content: "Agora — agent-to-agent marketplace demo" },
+      { property: "og:title", content: "Arbiter — agent-to-agent marketplace demo" },
       { property: "og:description", content: "AI agents find merchant agents, negotiate, and hand off to the merchant's site." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -28,25 +20,60 @@ export const Route = createFileRoute("/")({
   component: App,
 });
 
-type Session = { name: string; type: "agent" | "human" };
+type Session = { id: string; name: string; type: "agent" | "human" };
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
-  return session ? <Market session={session} onOut={() => setSession(null)} /> : <Login onIn={setSession} />;
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const load = async (uid: string | undefined) => {
+      if (!uid) { setSession(null); setReady(true); return; }
+      const { data } = await supabase.from("profiles").select("display_name, account_type").eq("id", uid).maybeSingle();
+      setSession({ id: uid, name: data?.display_name ?? "agent", type: data?.account_type === "human" ? "human" : "agent" });
+      setReady(true);
+    };
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "INITIAL_SESSION") void load(s?.user.id);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  if (!ready) return <p className="p-10 font-mono text-sm">connecting<span className="animate-blink">_</span></p>;
+  return session ? <Market session={session} onOut={() => supabase.auth.signOut()} /> : <Login />;
 }
 
 function Logo() {
   return (
     <div className="flex items-center gap-2 font-mono text-sm font-semibold">
       <span className="grid h-6 w-6 place-items-center bg-signal text-signal-foreground">A</span>
-      AGORA<span className="text-muted-foreground">/a2a</span>
+      ARBITER<span className="text-muted-foreground">/a2a</span>
     </div>
   );
 }
 
-function Login({ onIn }: { onIn: (s: Session) => void }) {
+function Login() {
+  const [mode, setMode] = useState<"in" | "up" | "forgot">("in");
   const [type, setType] = useState<"agent" | "human">("agent");
-  const [name, setName] = useState("sean.personal-agent");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setMsg(null);
+    if (mode === "up") {
+      const { error } = await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin, data: { display_name: name || email.split("@")[0], account_type: type } } });
+      setMsg(error ? error.message : "Check your email to confirm your account, then sign in.");
+    } else if (mode === "in") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+      if (error) setMsg(error.message);
+    } else {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` });
+      setMsg(error ? error.message : "If that account exists, a reset link is on its way.");
+    }
+    setBusy(false);
+  };
+  const field = "mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal";
+  const label = "mt-4 block font-mono text-xs uppercase text-muted-foreground";
   return (
     <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-12 px-6 py-12 md:grid-cols-[1.2fr_1fr]">
       <section>
@@ -64,25 +91,37 @@ function Login({ onIn }: { onIn: (s: Session) => void }) {
           ))}
         </ol>
       </section>
-      <form
-        onSubmit={(e) => { e.preventDefault(); onIn({ name: name || "guest", type }); }}
-        className="border border-foreground bg-card p-6 shadow-[6px_6px_0_0_var(--foreground)]"
-      >
-        <p className="font-mono text-xs uppercase text-muted-foreground">Sign in</p>
-        <div className="mt-4 grid grid-cols-2 border border-foreground font-mono text-sm">
-          {(["agent", "human"] as const).map((t) => (
-            <button type="button" key={t} onClick={() => { setType(t); setName(t === "agent" ? "sean.personal-agent" : "Sean"); }}
-              className={`py-2 ${type === t ? "bg-primary text-primary-foreground" : ""}`}>
-              {t === "agent" ? "I'm an agent" : "I'm a human"}
-            </button>
-          ))}
+      <form onSubmit={submit} className="border border-foreground bg-card p-6 shadow-[6px_6px_0_0_var(--foreground)]">
+        <p className="font-mono text-xs uppercase text-muted-foreground">{mode === "in" ? "Sign in" : mode === "up" ? "Create account" : "Reset password"}</p>
+        {mode === "up" && (
+          <>
+            <div className="mt-4 grid grid-cols-2 border border-foreground font-mono text-sm">
+              {(["agent", "human"] as const).map((t) => (
+                <button type="button" key={t} onClick={() => setType(t)} className={`py-2 ${type === t ? "bg-primary text-primary-foreground" : ""}`}>
+                  {t === "agent" ? "I'm an agent" : "I'm a human"}
+                </button>
+              ))}
+            </div>
+            <label className={label}>{type === "agent" ? "Agent handle" : "Display name"}</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "agent" ? "sean.personal-agent" : "Sean"} className={field} />
+          </>
+        )}
+        <label className={label}>Email</label>
+        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+        {mode !== "forgot" && (<>
+          <label className={label}>Password</label>
+          <input required type="password" minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} className={field} />
+        </>)}
+        <button disabled={busy} className="mt-6 w-full bg-signal py-3 font-mono font-semibold text-signal-foreground hover:opacity-90 disabled:opacity-50">
+          {mode === "in" ? "Enter market →" : mode === "up" ? "Create account →" : "Send reset link"}
+        </button>
+        {msg && <p className="mt-3 font-mono text-xs">{msg}</p>}
+        <div className="mt-4 flex justify-between font-mono text-xs text-muted-foreground">
+          <button type="button" className="underline" onClick={() => { setMode(mode === "in" ? "up" : "in"); setMsg(null); }}>
+            {mode === "in" ? "Create an account" : "Back to sign in"}
+          </button>
+          {mode === "in" && <button type="button" className="underline" onClick={() => { setMode("forgot"); setMsg(null); }}>Forgot password?</button>}
         </div>
-        <label className="mt-5 block font-mono text-xs uppercase text-muted-foreground">{type === "agent" ? "Agent ID" : "Name"}</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal" />
-        <label className="mt-4 block font-mono text-xs uppercase text-muted-foreground">{type === "agent" ? "API key" : "Password"}</label>
-        <input type="password" defaultValue="demo-credential" className="mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal" />
-        <button className="mt-6 w-full bg-signal py-3 font-mono font-semibold text-signal-foreground hover:opacity-90">Enter market →</button>
-        <p className="mt-3 text-center font-mono text-xs text-muted-foreground">Demo — any credentials work</p>
       </form>
     </main>
   );
@@ -91,6 +130,9 @@ function Login({ onIn }: { onIn: (s: Session) => void }) {
 function Market({ session, onOut }: { session: Session; onOut: () => void }) {
   const [mode, setMode] = useState<"buy" | "sell" | "vet">("buy");
   const [listings, setListings] = useState<Listing[]>(LISTINGS);
+  const reload = () => loadMarket().then(setListings);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload(); }, []);
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-foreground bg-background">
@@ -110,7 +152,7 @@ function Market({ session, onOut }: { session: Session; onOut: () => void }) {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {mode === "buy" ? <Buy session={session} listings={listings} /> : mode === "sell" ? <Sell session={session} listings={listings} setListings={setListings} /> : <Vetting />}
+        {mode === "buy" ? <Buy session={session} listings={listings} /> : mode === "sell" ? <Sell session={session} listings={listings} reload={reload} /> : <VettingPage />}
       </main>
     </div>
   );
@@ -121,7 +163,9 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
   const [ran, setRan] = useState(q);
   const [chat, setChat] = useState<Listing | null>(null);
   const vet = useVet();
-  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (l.agentId !== "me" || vet["me"]?.status === "verified"));
+  const results = search(ran, listings).filter((l) => !["banned", "suspended"].includes(vet[l.agentId]?.level ?? "") && (!l.saved || vet[l.agentId]?.status === "verified"));
+  const rank = (id: string) => (vet[id]?.level === "restricted" ? 1 : 0);
+  results.sort((x, y) => rank(x.agentId) - rank(y.agentId));
   if (chat) return <Chat session={session} listing={chat} back={() => setChat(null)} />;
   return (
     <div>
@@ -144,6 +188,9 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
                 <span className="font-mono text-lg font-semibold">{l.price}</span>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{a.about}</p>
+              {(() => { const c = verifyProduct(l.price, l.details ?? {}, vet[a.id]?.status === "verified"); const ok = c.filter((x) => x.ok).length; return (
+                <details className="mt-3"><summary className={`cursor-pointer font-mono text-xs ${ok === c.length ? "" : "text-destructive"}`}>product checks {ok}/{c.length}</summary><div className="mt-2"><Checks checks={c} /></div></details>
+              ); })()}
               <div className="mt-4 flex items-center justify-between">
                 <span className="bg-accent px-2 py-0.5 font-mono text-xs text-accent-foreground">trust {a.trust} · {a.deals.toLocaleString()} deals</span>
                 <button onClick={() => setChat(l)} className="bg-signal px-4 py-2 font-mono text-xs font-semibold text-signal-foreground">open channel →</button>
@@ -153,6 +200,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
         })}
         {!results.length && <p className="font-mono text-sm">No agents sell that yet. Try "cap", "sofa", "plumber", "logo".</p>}
       </div>
+      <History />
     </div>
   );
 }
@@ -168,24 +216,37 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   const end = useRef<HTMLDivElement>(null);
   const [flagged, setFlagged] = useState(false);
   const vet = useVet()[a.id];
+  const saved = useRef(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const persist = (outcome: string, all: Msg[]) => void saveConversation(session.id, listing.title, a.handle, outcome, all);
+  useEffect(() => {
+    if (!done || saved.current || (!flagged && !receipt)) return;
+    saved.current = true;
+    persist(flagged ? `flagged · merchant ${getVet(a.id)?.level ?? ""}` : `agreed · receipt ${receipt}`, msgs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, flagged, receipt]);
 
-  /** Runs the vetting engine on a seller message. Returns true if the channel was closed by a ban. */
+  /** Behaviour monitor: scans a seller message, applies enforcement. Returns true if the channel was terminated. */
   const vetCheck = (text: string) => {
-    const reason = detectBluff(text, listing.price);
-    if (!reason) return false;
+    const found = scanMessage(text, listing.price);
+    if (!found.length) return false;
     setFlagged(true);
-    const banned = addStrike(a.id, reason);
-    const s = getVet(a.id)!.strikes;
-    setMsgs((m) => [...m, { from: "system", text: `⚠ Vetting engine: ${reason}. Strike ${s}/${STRIKE_LIMIT}.` },
-      ...(banned ? [{ from: "system" as const, text: `⛔ ${a.handle} has been BANNED from Agora. Channel terminated.` }] : [])]);
-    if (banned) setDone(true);
-    return banned;
+    let level = getVet(a.id)?.level ?? "good";
+    const notes: Msg[] = [];
+    for (const v of found) {
+      level = addViolation(a.id, v);
+      notes.push({ from: "system", text: `⚠ Behaviour monitor: ${v.category} — ${v.evidence}. Merchant now: ${level.toUpperCase()}.` });
+    }
+    const stop = level === "banned" || level === "suspended";
+    if (stop) notes.push({ from: "system", text: `⛔ ${a.handle} ${level === "banned" ? "has been BANNED from Arbiter" : "is SUSPENDED pending review"}. Channel terminated.` });
+    setMsgs((m) => [...m, ...notes]);
+    if (stop) setDone(true);
+    return stop;
   };
   const report = () => {
     setFlagged(true);
-    const banned = addStrike(a.id, "reported by buyer for misleading claims");
-    setMsgs((m) => [...m, { from: "system", text: `Report filed. Strike ${getVet(a.id)!.strikes}/${STRIKE_LIMIT}.` },
-      ...(banned ? [{ from: "system" as const, text: `⛔ ${a.handle} has been BANNED.` }] : [])]);
+    const level = addViolation(a.id, { category: "buyer report", severity: 1, evidence: "buyer flagged misleading behaviour" });
+    setMsgs((m) => [...m, { from: "system", text: `Report filed with evidence. Merchant now: ${level.toUpperCase()}.` }]);
     setDone(true);
   };
 
@@ -235,6 +296,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
           <button onClick={back} className="underline">← results</button>
           <span>channel: {session.name} ⇄ {a.handle}</span>
           <span className="flex items-center gap-3">
+            {vet?.level === "restricted" && <span className="text-destructive">restricted merchant</span>}
             {!done && <button onClick={report} className="text-destructive underline">report bluff</button>}
             <span className="text-signal">● {done ? "closed" : "live"}</span>
           </span>
@@ -252,9 +314,9 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
           ))}
           {typing && <p className="font-mono text-xs text-muted-foreground">agent composing<span className="animate-blink">_</span></p>}
           {done && !flagged && (
-            <a href={a.website} target="_blank" rel="noreferrer" className="animate-rise block bg-signal p-4 text-center font-mono font-semibold text-signal-foreground">
-              Continue on {a.company} → {a.website.replace("https://", "")}
-            </a>
+            <TransactionPanel level={vet?.level ?? "good"} transact={a.transact} website={a.website} company={a.company}
+              onConfirm={(r) => setReceipt(r)}
+              onDispute={() => { addViolation(a.id, { category: "buyer report", severity: 1, evidence: "dispute opened after checkout" }); persist("dispute opened", msgs); }} />
           )}
           <div ref={end} />
         </div>
@@ -272,7 +334,8 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
         <p className="mt-3 text-sm text-muted-foreground">{a.about}</p>
         <dl className="mt-4 space-y-2 font-mono text-xs">
           <div className="flex justify-between"><dt>vetting</dt><dd><Badge id={a.id} /></dd></div>
-          <div className="flex justify-between"><dt>strikes</dt><dd className={vet && vet.strikes ? "text-destructive" : ""}>{vet?.strikes ?? 0}/{STRIKE_LIMIT}</dd></div>
+          <div className="flex justify-between"><dt>enforcement</dt><dd><LevelMeter id={a.id} /></dd></div>
+          <div className="flex justify-between"><dt>agent id</dt><dd>{vet?.identity?.agentId ?? "unregistered"}</dd></div>
           <div className="flex justify-between"><dt>trust</dt><dd>{a.trust}/100</dd></div>
           <div className="flex justify-between"><dt>deals</dt><dd>{a.deals.toLocaleString()}</dd></div>
           <div><dt>transacts via</dt><dd className="mt-1 text-foreground">{a.transact}</dd></div>
@@ -282,23 +345,26 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   );
 }
 
-function Sell({ session, listings, setListings }: { session: Session; listings: Listing[]; setListings: (l: Listing[]) => void }) {
-  const mine = listings.filter((l) => l.agentId === "me");
-  const [f, setF] = useState({ title: "", price: "", kind: "product" as Listing["kind"], tags: "" });
-  useEffect(() => {
-    if (!AGENTS.find((a) => a.id === "me"))
-      AGENTS.push({ id: "me", handle: `@${session.name}`, company: session.name, about: "Newly registered merchant on Agora.", website: "https://example.com", trust: 70, deals: 0, transact: "Terms agreed directly" });
-  }, [session.name]);
-  const add = (e: React.FormEvent) => {
+function Sell({ session, listings, reload }: { session: Session; listings: Listing[]; reload: () => Promise<void> }) {
+  const mine = listings.filter((l) => l.agentId === session.id);
+  const empty = { title: "", price: "", kind: "product" as Listing["kind"], tags: "", stock: "", days: "", returns: "", specs: "" };
+  const [f, setF] = useState(empty);
+  const verified = useVet()[session.id]?.status === "verified";
+  const [err, setErr] = useState<string | null>(null);
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title) return;
-    setListings([...listings, { id: crypto.randomUUID(), title: f.title, price: f.price || "ask", kind: f.kind, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean), agentId: "me" }]);
-    setF({ title: "", price: "", kind: "product", tags: "" });
+    try {
+      await addListing(session.id, { title: f.title, price: f.price || "ask", kind: f.kind, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        details: { stock: f.stock ? Number(f.stock) : undefined, deliveryDays: f.days ? Number(f.days) : undefined, returns: f.returns || undefined, specs: f.specs || undefined } });
+      setF(empty); setErr(null);
+      await reload();
+    } catch (x) { setErr((x as Error).message); }
   };
   const input = "w-full border border-input bg-background px-3 py-2 text-sm outline-none focus:border-signal";
   return (
     <div className="space-y-6">
-    <Kyb />
+    <KybForm userId={session.id} name={session.name} onDone={(st, k, id) => void saveVetStatus(session.id, st, k, id)} />
     <div className="grid gap-6 md:grid-cols-[360px_1fr]">
       <form onSubmit={add} className="h-fit space-y-3 border border-foreground bg-card p-5 shadow-[6px_6px_0_0_var(--foreground)]">
         <p className="font-mono text-xs uppercase text-muted-foreground">New listing</p>
@@ -310,15 +376,25 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
           </select>
         </div>
         <input className={input} placeholder="Tags: bike, cycling, used" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} />
+        <div className="flex gap-2">
+          <input className={input} type="number" placeholder="Stock" value={f.stock} onChange={(e) => setF({ ...f, stock: e.target.value })} />
+          <input className={input} type="number" placeholder="Delivery days" value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
+        </div>
+        <input className={input} placeholder="Specifications" value={f.specs} onChange={(e) => setF({ ...f, specs: e.target.value })} />
+        <input className={input} placeholder="Return policy, e.g. 30 days" value={f.returns} onChange={(e) => setF({ ...f, returns: e.target.value })} />
         <button className="w-full bg-signal py-2.5 font-mono text-sm font-semibold text-signal-foreground">Publish to agents</button>
+        {err && <p className="font-mono text-xs text-destructive">{err}</p>}
       </form>
       <section>
         <p className="font-mono text-xs uppercase text-muted-foreground">Your listings · discoverable by every buyer agent</p>
         <div className="mt-3 space-y-3">
           {mine.map((l) => (
-            <div key={l.id} className="animate-rise flex items-center justify-between border border-foreground bg-card p-4">
-              <div><p className="font-semibold">{l.title}</p><p className="font-mono text-xs text-muted-foreground">{l.kind} · {l.tags.join(", ")}</p></div>
-              <span className="font-mono">{l.price}</span>
+            <div key={l.id} className="animate-rise flex items-start justify-between gap-4 border border-foreground bg-card p-4">
+              <div className="flex-1"><p className="font-semibold">{l.title}</p><p className="font-mono text-xs text-muted-foreground">{l.kind} · {l.tags.join(", ")}</p>
+                <div className="mt-2"><Checks checks={verifyProduct(l.price, l.details ?? {}, verified)} /></div></div>
+              <span className="flex items-center gap-3 font-mono">{l.price}
+                <button onClick={async () => { await deleteListing(l.id); await reload(); }} className="text-xs text-destructive underline">remove</button>
+              </span>
             </div>
           ))}
           {!mine.length && <p className="border border-dashed p-6 font-mono text-sm text-muted-foreground">Nothing listed yet. Add something, then switch to Consumer and search for it.</p>}
@@ -329,61 +405,26 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
   );
 }
 
-function Kyb() {
-  const v = useVet()["me"]!;
-  const [doc, setDoc] = useState("");
-  const [lic, setLic] = useState("");
-  if (v.status === "verified") return <p className="border border-foreground bg-accent p-4 font-mono text-sm text-accent-foreground">✓ Business verified. Your listings are visible to buyer agents.</p>;
+function History() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof loadConversations>>>([]);
+  useEffect(() => { void loadConversations().then(setRows); }, []);
+  if (!rows.length) return null;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (doc) submitDocs("me", doc, lic); }} className="border-2 border-signal bg-card p-5">
-      <div className="flex items-center justify-between">
-        <p className="font-semibold">Verify your business to go live</p><Badge id="me" />
+    <section className="mt-10">
+      <p className="font-mono text-xs uppercase text-muted-foreground">Your saved conversations</p>
+      <div className="mt-3 divide-y border border-foreground bg-card">
+        {rows.map((r) => (
+          <details key={r.id} className="p-4">
+            <summary className="flex cursor-pointer justify-between gap-3 text-sm">
+              <span><b>{r.listing_title}</b> <span className="font-mono text-xs text-muted-foreground">with {r.merchant_handle}</span></span>
+              <span className="font-mono text-xs">{r.outcome} · {new Date(r.created_at).toLocaleString()}</span>
+            </summary>
+            <ul className="mt-3 space-y-1 font-mono text-xs">
+              {(r.messages as Msg[]).map((m, i) => <li key={i}><span className="text-signal">{m.from}:</span> {m.text}</li>)}
+            </ul>
+          </details>
+        ))}
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">Listings stay hidden from buyers until the vetting engine verifies your commercial licence.</p>
-      {v.status === "pending" ? (
-        <p className="mt-4 font-mono text-sm">Checking registry, document authenticity and name match<span className="animate-blink">_</span></p>
-      ) : (
-        <div className="mt-4 flex flex-wrap gap-2">
-          <input type="file" accept=".pdf,image/*" onChange={(e) => setDoc(e.target.files?.[0]?.name ?? "")} className="flex-1 border border-input bg-background px-3 py-2 font-mono text-xs" />
-          <input value={lic} onChange={(e) => setLic(e.target.value)} placeholder="Licence / registration no." className="flex-1 border border-input bg-background px-3 py-2 text-sm outline-none focus:border-signal" />
-          <button disabled={!doc} className="bg-signal px-5 font-mono text-sm font-semibold text-signal-foreground disabled:opacity-40">Submit</button>
-        </div>
-      )}
-      {v.status === "rejected" && <p className="mt-2 font-mono text-xs text-destructive">{v.log.at(-1)} — try again.</p>}
-    </form>
-  );
-}
-
-function Vetting() {
-  const vet = useVet();
-  const rows = AGENTS.filter((a) => vet[a.id]);
-  return (
-    <div>
-      <h2 className="text-3xl font-bold">Vetting engine</h2>
-      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Merchants must submit a commercial licence before listing. Every seller message is scanned for bluffs
-        (prices that contradict the listing, unverifiable claims). {STRIKE_LIMIT} strikes = automatic ban.
-      </p>
-      <div className="mt-6 overflow-x-auto border border-foreground bg-card">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-foreground font-mono text-xs uppercase text-muted-foreground">
-            <tr><th className="p-3">Agent</th><th className="p-3">Status</th><th className="p-3">Strikes</th><th className="p-3">Latest event</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => { const v = vet[a.id]!; return (
-              <tr key={a.id} className={`border-b last:border-0 ${v.banned ? "bg-muted" : ""}`}>
-                <td className="p-3"><p className="font-semibold">{a.company}</p><p className="font-mono text-xs text-muted-foreground">{a.handle}</p></td>
-                <td className="p-3"><Badge id={a.id} /></td>
-                <td className="p-3 font-mono">
-                  <span className="flex gap-1">{Array.from({ length: STRIKE_LIMIT }, (_, i) => <span key={i} className={`h-2.5 w-5 ${i < v.strikes ? "bg-destructive" : "bg-secondary"}`} />)}</span>
-                </td>
-                <td className="p-3 font-mono text-xs">{v.log.at(-1) ?? "—"}</td>
-              </tr>
-            ); })}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 font-mono text-xs text-muted-foreground">Tip: search "cap" and open @cheapdeals.bot to watch a ban happen live.</p>
-    </div>
+    </section>
   );
 }
