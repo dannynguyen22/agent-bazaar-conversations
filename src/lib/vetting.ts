@@ -12,7 +12,6 @@ let state: Record<string, VetRecord> = {
   fixit: { status: "verified", strikes: 1, banned: false, log: ["Licence verified", "Strike: quoted €60, invoiced €140"] },
   pixel: { status: "pending", strikes: 0, banned: false, log: ["Documents submitted, under review"] },
   cheapdeals: { status: "unverified", strikes: 2, banned: false, log: ["Strike: claimed 'genuine' on replica item", "Strike: changed price mid-deal"] },
-  me: { status: "unverified", strikes: 0, banned: false, log: [] },
 };
 const subs = new Set<() => void>();
 const set = (id: string, r: Partial<VetRecord>) => {
@@ -36,7 +35,13 @@ export function addStrike(id: string, reason: string) {
   return banned;
 }
 
-export function submitDocs(id: string, doc: string, licence: string) {
+/** Registers a database-backed merchant in the vetting store (keeps existing strikes). */
+export function registerVet(id: string, status: VetStatus) {
+  if (state[id]?.status === status) return;
+  set(id, { status });
+}
+
+export function submitDocs(id: string, doc: string, licence: string, onDone?: (s: VetStatus) => void) {
   set(id, { status: "pending", doc, log: [...(state[id]?.log ?? []), `Submitted ${doc} (licence ${licence})`] });
   setTimeout(() => {
     const ok = licence.trim().length >= 5;
@@ -44,6 +49,7 @@ export function submitDocs(id: string, doc: string, licence: string) {
       status: ok ? "verified" : "rejected",
       log: [...state[id]!.log, ok ? "Registry match ✓ · document authentic ✓ · name match ✓" : "Rejected: licence number not found in registry"],
     });
+    onDone?.(ok ? "verified" : "rejected");
   }, 3500);
 }
 
