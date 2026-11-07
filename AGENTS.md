@@ -28,3 +28,5 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+- Vetting uses a presentation-only demo access gate that resets on leaving the page; it must never grant real account roles or bypass backend authorization.

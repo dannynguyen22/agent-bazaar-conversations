@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DemoAdminGate } from "@/components/demo-admin-gate";
 import { AGENTS } from "@/lib/market-data";
 import {
   BAN_AT, LADDER, crossCheck, submitKyb, useVet,
@@ -121,6 +122,10 @@ const PILLARS = [
 ];
 
 export function VettingPage() {
+  return <DemoAdminGate><VettingDashboard /></DemoAdminGate>;
+}
+
+function VettingDashboard() {
   const vet = useVet();
   const rows = AGENTS.filter((a) => vet[a.id]);
   return (
@@ -150,7 +155,7 @@ export function VettingPage() {
             <tr><th className="p-3">Agent</th><th className="p-3">Business</th><th className="p-3">Agent ID</th><th className="p-3">Enforcement</th><th className="p-3">Latest event</th></tr>
           </thead>
           <tbody>
-            {rows.map((a) => { const v = vet[a.id]!; return (
+            {rows.map((a) => { const v = vet[a.id]; if (!v) return null; return (
               <tr key={a.id} className={`border-b last:border-0 ${v.level === "banned" ? "bg-muted" : ""}`}>
                 <td className="p-3"><p className="font-semibold">{a.company}</p><p className="font-mono text-xs text-muted-foreground">{a.handle}</p></td>
                 <td className="p-3"><Badge id={a.id} /></td>
