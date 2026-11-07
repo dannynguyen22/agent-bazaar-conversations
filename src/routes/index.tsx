@@ -164,7 +164,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     const step = () => {
       if (i >= full.length) { setTyping(false); setDone(true); return; }
       setTyping(true);
-      t = setTimeout(() => { setMsgs((m) => [...m, full[i++]]); step(); }, 1100);
+      t = setTimeout(() => { const next = full[i++]; setMsgs((m) => [...m, next]); step(); }, 1100);
     };
     step();
     return () => clearTimeout(t);
