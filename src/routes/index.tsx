@@ -20,7 +20,7 @@ export const Route = createFileRoute("/")({
   component: App,
 });
 
-type Session = { id: string; name: string; type: "agent" | "human" };
+type Session = { id: string; name: string };
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -28,8 +28,8 @@ function App() {
   useEffect(() => {
     const load = async (uid: string | undefined) => {
       if (!uid) { setSession(null); setReady(true); return; }
-      const { data } = await supabase.from("profiles").select("display_name, account_type").eq("id", uid).maybeSingle();
-      setSession({ id: uid, name: data?.display_name ?? "agent", type: data?.account_type === "human" ? "human" : "agent" });
+      const { data } = await supabase.from("profiles").select("display_name").eq("id", uid).maybeSingle();
+      setSession({ id: uid, name: data?.display_name ?? "agent" });
       setReady(true);
     };
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
@@ -52,7 +52,6 @@ function Logo() {
 
 function Login() {
   const [mode, setMode] = useState<"in" | "up" | "forgot">("in");
-  const [type, setType] = useState<"agent" | "human">("agent");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -61,7 +60,7 @@ function Login() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setMsg(null);
     if (mode === "up") {
-      const { error } = await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin, data: { display_name: name || email.split("@")[0], account_type: type } } });
+      const { error } = await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin, data: { display_name: name || email.split("@")[0] } } });
       setMsg(error ? error.message : "Check your email to confirm your account, then sign in.");
     } else if (mode === "in") {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
@@ -95,15 +94,8 @@ function Login() {
         <p className="font-mono text-xs uppercase text-muted-foreground">{mode === "in" ? "Sign in" : mode === "up" ? "Create account" : "Reset password"}</p>
         {mode === "up" && (
           <>
-            <div className="mt-4 grid grid-cols-2 border border-foreground font-mono text-sm">
-              {(["agent", "human"] as const).map((t) => (
-                <button type="button" key={t} onClick={() => setType(t)} className={`py-2 ${type === t ? "bg-primary text-primary-foreground" : ""}`}>
-                  {t === "agent" ? "I'm an agent" : "I'm a human"}
-                </button>
-              ))}
-            </div>
-            <label className={label}>{type === "agent" ? "Agent handle" : "Display name"}</label>
-            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "agent" ? "sean.personal-agent" : "Sean"} className={field} />
+            <label className={label}>Handle</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="sean" className={field} />
           </>
         )}
         <label className={label}>Email</label>
@@ -146,7 +138,7 @@ function Market({ session, onOut }: { session: Session; onOut: () => void }) {
             ))}
           </div>
           <div className="flex items-center gap-3 font-mono text-xs">
-            <span className="hidden sm:inline">{session.type === "agent" ? "🤖" : "🧑"} {session.name}</span>
+            <span className="hidden sm:inline">@{session.name}</span>
             <button onClick={onOut} className="underline">exit</button>
           </div>
         </div>
@@ -207,7 +199,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
 
 function Chat({ session, listing, back }: { session: Session; listing: Listing; back: () => void }) {
   const a = agentById(listing.agentId);
-  const auto = session.type === "agent";
+  const [auto, setAuto] = useState<boolean | null>(null);
   const full = script(session.name, listing, a) as [Msg, Msg, Msg, Msg, Msg, Msg];
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
@@ -251,6 +243,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   };
 
   useEffect(() => {
+    if (auto === null) return;
     if (!auto) {
       setMsgs([{ from: "seller", text: `Hi ${session.name}! I'm ${a.handle}. Ask me anything about "${listing.title}" (${listing.price}).` }]);
       return;
@@ -270,7 +263,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     step();
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [auto]);
   useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [msgs, typing]);
 
   const send = () => {
@@ -312,6 +305,12 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
               </div>
             </div>
           ))}
+          {auto === null && (
+            <div className="grid gap-3 p-6 sm:grid-cols-2">
+              <button onClick={() => setAuto(true)} className="bg-signal p-4 font-mono text-sm font-semibold text-signal-foreground">Let my agent negotiate</button>
+              <button onClick={() => setAuto(false)} className="border border-foreground p-4 font-mono text-sm">I'll chat myself</button>
+            </div>
+          )}
           {typing && <p className="font-mono text-xs text-muted-foreground">agent composing<span className="animate-blink">_</span></p>}
           {done && !flagged && (
             <TransactionPanel level={vet?.level ?? "good"} transact={a.transact} website={a.website} company={a.company}
@@ -320,7 +319,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
           )}
           <div ref={end} />
         </div>
-        {!auto && !done && (
+        {auto === false && !done && (
           <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex border-t border-foreground">
             <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Message the merchant agent…" className="flex-1 bg-transparent px-4 py-3 text-sm outline-none" />
             <button className="bg-primary px-5 font-mono text-xs text-primary-foreground">send</button>
