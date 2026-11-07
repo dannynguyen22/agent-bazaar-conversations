@@ -72,7 +72,9 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto]);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [msgs, typing]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [msgs, typing]);
 
   const send = () => {
     if (!draft.trim()) return;
