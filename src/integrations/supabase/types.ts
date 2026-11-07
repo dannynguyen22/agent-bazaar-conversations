@@ -47,6 +47,7 @@ export type Database = {
       listings: {
         Row: {
           created_at: string
+          details: Json
           id: string
           kind: string
           price: string
@@ -56,6 +57,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          details?: Json
           id?: string
           kind?: string
           price?: string
@@ -65,6 +67,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          details?: Json
           id?: string
           kind?: string
           price?: string
@@ -77,28 +80,34 @@ export type Database = {
       profiles: {
         Row: {
           account_type: string
+          agent_identity: Json | null
           created_at: string
           display_name: string
           doc_name: string | null
           id: string
+          kyb: Json | null
           licence: string | null
           vet_status: string
         }
         Insert: {
           account_type?: string
+          agent_identity?: Json | null
           created_at?: string
           display_name?: string
           doc_name?: string | null
           id: string
+          kyb?: Json | null
           licence?: string | null
           vet_status?: string
         }
         Update: {
           account_type?: string
+          agent_identity?: Json | null
           created_at?: string
           display_name?: string
           doc_name?: string | null
           id?: string
+          kyb?: Json | null
           licence?: string | null
           vet_status?: string
         }
