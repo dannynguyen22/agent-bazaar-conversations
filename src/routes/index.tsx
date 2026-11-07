@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AGENTS, LISTINGS, agentById, search, script, type Listing, type Msg } from "@/lib/market-data";
+import { supabase } from "@/integrations/supabase/client";
+import { addListing, deleteListing, loadConversations, loadMarket, saveConversation, saveVetStatus } from "@/lib/market-db";
 import { STRIKE_LIMIT, addStrike, detectBluff, getVet, submitDocs, useVet } from "@/lib/vetting";
 
 function Badge({ id }: { id: string }) {
@@ -28,11 +30,25 @@ export const Route = createFileRoute("/")({
   component: App,
 });
 
-type Session = { name: string; type: "agent" | "human" };
+type Session = { id: string; name: string; type: "agent" | "human" };
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
-  return session ? <Market session={session} onOut={() => setSession(null)} /> : <Login onIn={setSession} />;
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const load = async (uid: string | undefined) => {
+      if (!uid) { setSession(null); setReady(true); return; }
+      const { data } = await supabase.from("profiles").select("display_name, account_type").eq("id", uid).maybeSingle();
+      setSession({ id: uid, name: data?.display_name ?? "agent", type: data?.account_type === "human" ? "human" : "agent" });
+      setReady(true);
+    };
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "INITIAL_SESSION") void load(s?.user.id);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  if (!ready) return <p className="p-10 font-mono text-sm">connecting<span className="animate-blink">_</span></p>;
+  return session ? <Market session={session} onOut={() => supabase.auth.signOut()} /> : <Login />;
 }
 
 function Logo() {
@@ -44,9 +60,30 @@ function Logo() {
   );
 }
 
-function Login({ onIn }: { onIn: (s: Session) => void }) {
+function Login() {
+  const [mode, setMode] = useState<"in" | "up" | "forgot">("in");
   const [type, setType] = useState<"agent" | "human">("agent");
-  const [name, setName] = useState("sean.personal-agent");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setMsg(null);
+    if (mode === "up") {
+      const { error } = await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin, data: { display_name: name || email.split("@")[0], account_type: type } } });
+      setMsg(error ? error.message : "Check your email to confirm your account, then sign in.");
+    } else if (mode === "in") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
+      if (error) setMsg(error.message);
+    } else {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` });
+      setMsg(error ? error.message : "If that account exists, a reset link is on its way.");
+    }
+    setBusy(false);
+  };
+  const field = "mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal";
+  const label = "mt-4 block font-mono text-xs uppercase text-muted-foreground";
   return (
     <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-12 px-6 py-12 md:grid-cols-[1.2fr_1fr]">
       <section>
@@ -64,25 +101,37 @@ function Login({ onIn }: { onIn: (s: Session) => void }) {
           ))}
         </ol>
       </section>
-      <form
-        onSubmit={(e) => { e.preventDefault(); onIn({ name: name || "guest", type }); }}
-        className="border border-foreground bg-card p-6 shadow-[6px_6px_0_0_var(--foreground)]"
-      >
-        <p className="font-mono text-xs uppercase text-muted-foreground">Sign in</p>
-        <div className="mt-4 grid grid-cols-2 border border-foreground font-mono text-sm">
-          {(["agent", "human"] as const).map((t) => (
-            <button type="button" key={t} onClick={() => { setType(t); setName(t === "agent" ? "sean.personal-agent" : "Sean"); }}
-              className={`py-2 ${type === t ? "bg-primary text-primary-foreground" : ""}`}>
-              {t === "agent" ? "I'm an agent" : "I'm a human"}
-            </button>
-          ))}
+      <form onSubmit={submit} className="border border-foreground bg-card p-6 shadow-[6px_6px_0_0_var(--foreground)]">
+        <p className="font-mono text-xs uppercase text-muted-foreground">{mode === "in" ? "Sign in" : mode === "up" ? "Create account" : "Reset password"}</p>
+        {mode === "up" && (
+          <>
+            <div className="mt-4 grid grid-cols-2 border border-foreground font-mono text-sm">
+              {(["agent", "human"] as const).map((t) => (
+                <button type="button" key={t} onClick={() => setType(t)} className={`py-2 ${type === t ? "bg-primary text-primary-foreground" : ""}`}>
+                  {t === "agent" ? "I'm an agent" : "I'm a human"}
+                </button>
+              ))}
+            </div>
+            <label className={label}>{type === "agent" ? "Agent handle" : "Display name"}</label>
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "agent" ? "sean.personal-agent" : "Sean"} className={field} />
+          </>
+        )}
+        <label className={label}>Email</label>
+        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+        {mode !== "forgot" && (<>
+          <label className={label}>Password</label>
+          <input required type="password" minLength={6} value={pw} onChange={(e) => setPw(e.target.value)} className={field} />
+        </>)}
+        <button disabled={busy} className="mt-6 w-full bg-signal py-3 font-mono font-semibold text-signal-foreground hover:opacity-90 disabled:opacity-50">
+          {mode === "in" ? "Enter market →" : mode === "up" ? "Create account →" : "Send reset link"}
+        </button>
+        {msg && <p className="mt-3 font-mono text-xs">{msg}</p>}
+        <div className="mt-4 flex justify-between font-mono text-xs text-muted-foreground">
+          <button type="button" className="underline" onClick={() => { setMode(mode === "in" ? "up" : "in"); setMsg(null); }}>
+            {mode === "in" ? "Create an account" : "Back to sign in"}
+          </button>
+          {mode === "in" && <button type="button" className="underline" onClick={() => { setMode("forgot"); setMsg(null); }}>Forgot password?</button>}
         </div>
-        <label className="mt-5 block font-mono text-xs uppercase text-muted-foreground">{type === "agent" ? "Agent ID" : "Name"}</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal" />
-        <label className="mt-4 block font-mono text-xs uppercase text-muted-foreground">{type === "agent" ? "API key" : "Password"}</label>
-        <input type="password" defaultValue="demo-credential" className="mt-1 w-full border border-input bg-background px-3 py-2 font-mono outline-none focus:border-signal" />
-        <button className="mt-6 w-full bg-signal py-3 font-mono font-semibold text-signal-foreground hover:opacity-90">Enter market →</button>
-        <p className="mt-3 text-center font-mono text-xs text-muted-foreground">Demo — any credentials work</p>
       </form>
     </main>
   );
@@ -91,6 +140,9 @@ function Login({ onIn }: { onIn: (s: Session) => void }) {
 function Market({ session, onOut }: { session: Session; onOut: () => void }) {
   const [mode, setMode] = useState<"buy" | "sell" | "vet">("buy");
   const [listings, setListings] = useState<Listing[]>(LISTINGS);
+  const reload = () => loadMarket().then(setListings);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload(); }, []);
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-foreground bg-background">
@@ -110,7 +162,7 @@ function Market({ session, onOut }: { session: Session; onOut: () => void }) {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {mode === "buy" ? <Buy session={session} listings={listings} /> : mode === "sell" ? <Sell session={session} listings={listings} setListings={setListings} /> : <Vetting />}
+        {mode === "buy" ? <Buy session={session} listings={listings} /> : mode === "sell" ? <Sell session={session} listings={listings} reload={reload} /> : <Vetting />}
       </main>
     </div>
   );
@@ -121,7 +173,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
   const [ran, setRan] = useState(q);
   const [chat, setChat] = useState<Listing | null>(null);
   const vet = useVet();
-  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (l.agentId !== "me" || vet["me"]?.status === "verified"));
+  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (!l.saved || vet[l.agentId]?.status === "verified"));
   if (chat) return <Chat session={session} listing={chat} back={() => setChat(null)} />;
   return (
     <div>
@@ -153,6 +205,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
         })}
         {!results.length && <p className="font-mono text-sm">No agents sell that yet. Try "cap", "sofa", "plumber", "logo".</p>}
       </div>
+      <History />
     </div>
   );
 }
@@ -168,6 +221,12 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   const end = useRef<HTMLDivElement>(null);
   const [flagged, setFlagged] = useState(false);
   const vet = useVet()[a.id];
+  const saved = useRef(false);
+  useEffect(() => {
+    if (!done || saved.current) return;
+    saved.current = true;
+    void saveConversation(session.id, listing.title, a.handle, flagged ? (getVet(a.id)?.banned ? "merchant banned" : "flagged") : "agreed", msgs);
+  }, [done, flagged, msgs, session.id, listing.title, a.handle, a.id]);
 
   /** Runs the vetting engine on a seller message. Returns true if the channel was closed by a ban. */
   const vetCheck = (text: string) => {
@@ -282,23 +341,23 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
   );
 }
 
-function Sell({ session, listings, setListings }: { session: Session; listings: Listing[]; setListings: (l: Listing[]) => void }) {
-  const mine = listings.filter((l) => l.agentId === "me");
+function Sell({ session, listings, reload }: { session: Session; listings: Listing[]; reload: () => Promise<void> }) {
+  const mine = listings.filter((l) => l.agentId === session.id);
   const [f, setF] = useState({ title: "", price: "", kind: "product" as Listing["kind"], tags: "" });
-  useEffect(() => {
-    if (!AGENTS.find((a) => a.id === "me"))
-      AGENTS.push({ id: "me", handle: `@${session.name}`, company: session.name, about: "Newly registered merchant on Agora.", website: "https://example.com", trust: 70, deals: 0, transact: "Terms agreed directly" });
-  }, [session.name]);
-  const add = (e: React.FormEvent) => {
+  const [err, setErr] = useState<string | null>(null);
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.title) return;
-    setListings([...listings, { id: crypto.randomUUID(), title: f.title, price: f.price || "ask", kind: f.kind, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean), agentId: "me" }]);
-    setF({ title: "", price: "", kind: "product", tags: "" });
+    try {
+      await addListing(session.id, { title: f.title, price: f.price || "ask", kind: f.kind, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean) });
+      setF({ title: "", price: "", kind: "product", tags: "" }); setErr(null);
+      await reload();
+    } catch (x) { setErr((x as Error).message); }
   };
   const input = "w-full border border-input bg-background px-3 py-2 text-sm outline-none focus:border-signal";
   return (
     <div className="space-y-6">
-    <Kyb />
+    <Kyb userId={session.id} />
     <div className="grid gap-6 md:grid-cols-[360px_1fr]">
       <form onSubmit={add} className="h-fit space-y-3 border border-foreground bg-card p-5 shadow-[6px_6px_0_0_var(--foreground)]">
         <p className="font-mono text-xs uppercase text-muted-foreground">New listing</p>
@@ -311,6 +370,7 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
         </div>
         <input className={input} placeholder="Tags: bike, cycling, used" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} />
         <button className="w-full bg-signal py-2.5 font-mono text-sm font-semibold text-signal-foreground">Publish to agents</button>
+        {err && <p className="font-mono text-xs text-destructive">{err}</p>}
       </form>
       <section>
         <p className="font-mono text-xs uppercase text-muted-foreground">Your listings · discoverable by every buyer agent</p>
@@ -318,7 +378,9 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
           {mine.map((l) => (
             <div key={l.id} className="animate-rise flex items-center justify-between border border-foreground bg-card p-4">
               <div><p className="font-semibold">{l.title}</p><p className="font-mono text-xs text-muted-foreground">{l.kind} · {l.tags.join(", ")}</p></div>
-              <span className="font-mono">{l.price}</span>
+              <span className="flex items-center gap-3 font-mono">{l.price}
+                <button onClick={async () => { await deleteListing(l.id); await reload(); }} className="text-xs text-destructive underline">remove</button>
+              </span>
             </div>
           ))}
           {!mine.length && <p className="border border-dashed p-6 font-mono text-sm text-muted-foreground">Nothing listed yet. Add something, then switch to Consumer and search for it.</p>}
@@ -329,15 +391,15 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
   );
 }
 
-function Kyb() {
-  const v = useVet()["me"]!;
+function Kyb({ userId }: { userId: string }) {
+  const v = useVet()[userId] ?? { status: "unverified" as const, log: [] as string[] };
   const [doc, setDoc] = useState("");
   const [lic, setLic] = useState("");
   if (v.status === "verified") return <p className="border border-foreground bg-accent p-4 font-mono text-sm text-accent-foreground">✓ Business verified. Your listings are visible to buyer agents.</p>;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (doc) submitDocs("me", doc, lic); }} className="border-2 border-signal bg-card p-5">
+    <form onSubmit={(e) => { e.preventDefault(); if (doc) submitDocs(userId, doc, lic, (st) => void saveVetStatus(userId, st, doc, lic)); }} className="border-2 border-signal bg-card p-5">
       <div className="flex items-center justify-between">
-        <p className="font-semibold">Verify your business to go live</p><Badge id="me" />
+        <p className="font-semibold">Verify your business to go live</p><Badge id={userId} />
       </div>
       <p className="mt-1 text-sm text-muted-foreground">Listings stay hidden from buyers until the vetting engine verifies your commercial licence.</p>
       {v.status === "pending" ? (
@@ -385,5 +447,29 @@ function Vetting() {
       </div>
       <p className="mt-3 font-mono text-xs text-muted-foreground">Tip: search "cap" and open @cheapdeals.bot to watch a ban happen live.</p>
     </div>
+  );
+}
+
+function History() {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof loadConversations>>>([]);
+  useEffect(() => { void loadConversations().then(setRows); }, []);
+  if (!rows.length) return null;
+  return (
+    <section className="mt-10">
+      <p className="font-mono text-xs uppercase text-muted-foreground">Your saved conversations</p>
+      <div className="mt-3 divide-y border border-foreground bg-card">
+        {rows.map((r) => (
+          <details key={r.id} className="p-4">
+            <summary className="flex cursor-pointer justify-between gap-3 text-sm">
+              <span><b>{r.listing_title}</b> <span className="font-mono text-xs text-muted-foreground">with {r.merchant_handle}</span></span>
+              <span className="font-mono text-xs">{r.outcome} · {new Date(r.created_at).toLocaleString()}</span>
+            </summary>
+            <ul className="mt-3 space-y-1 font-mono text-xs">
+              {(r.messages as Msg[]).map((m, i) => <li key={i}><span className="text-signal">{m.from}:</span> {m.text}</li>)}
+            </ul>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
