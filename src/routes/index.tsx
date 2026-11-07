@@ -147,7 +147,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
 function Chat({ session, listing, back }: { session: Session; listing: Listing; back: () => void }) {
   const a = agentById(listing.agentId);
   const auto = session.type === "agent";
-  const full = script(session.name, listing, a);
+  const full = script(session.name, listing, a) as [Msg, Msg, Msg, Msg, Msg, Msg];
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState("");
@@ -164,7 +164,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     const step = () => {
       if (i >= full.length) { setTyping(false); setDone(true); return; }
       setTyping(true);
-      t = setTimeout(() => { const next = full[i++]; setMsgs((m) => [...m, next]); step(); }, 1100);
+      t = setTimeout(() => { const next = full[i++] as Msg; setMsgs((m) => [...m, next]); step(); }, 1100);
     };
     step();
     return () => clearTimeout(t);
@@ -181,7 +181,7 @@ function Chat({ session, listing, back }: { session: Session; listing: Listing; 
     const replies = [full[1].text, full[3].text, "Great — terms locked. Here's your handoff link."];
     setTimeout(() => {
       setTyping(false);
-      setMsgs((m) => [...m, { from: "seller", text: replies[Math.min(turn, 2)] }]);
+      setMsgs((m) => [...m, { from: "seller", text: replies[Math.min(turn, 2)] ?? "" }]);
       if (turn >= 2) { setMsgs((m) => [...m, full[5]]); setDone(true); }
     }, 1000);
   };
