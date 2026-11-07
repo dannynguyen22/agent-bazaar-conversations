@@ -56,6 +56,7 @@ const id = (n: string, v: string): AgentIdentity => ({
 
 let state: Record<string, VetRecord> = {
   adidas: rec("verified", 0, ["Registry match: DE HRB 3868 · VAT ✓ · UBO ✓"], id("adidas", "2.4.1")),
+  nike: rec("verified", 0, ["Registry match: US EIN ✓ · NL VAT ✓ · UBO ✓"], id("nike", "3.1.0")),
   newera: rec("verified", 0, ["Registry match: US EIN ✓ · UBO ✓"], id("newera", "1.9.0")),
   mike: rec("verified", 0, ["Private seller ID verified"], id("mike", "1.0.0")),
   fixit: rec("verified", 1, ["Licence verified", "Warning: hidden fees (quoted €60, invoiced €140)"], id("fixit", "1.2.0")),
