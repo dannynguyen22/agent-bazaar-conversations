@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { AGENTS, LISTINGS, agentById, search, script, type Listing, type Msg } from "@/lib/market-data";
+import { rankListings } from "@/lib/ranking";
+import { AGENTS, LISTINGS, agentById, script, type Listing, type Msg } from "@/lib/market-data";
 import { supabase } from "@/integrations/supabase/client";
 import { addListing, deleteListing, loadConversations, loadMarket, saveConversation, saveVetStatus } from "@/lib/market-db";
 import { addViolation, getVet, scanMessage, useVet, verifyProduct } from "@/lib/vetting";
@@ -155,9 +156,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
   const [ran, setRan] = useState(q);
   const [chat, setChat] = useState<Listing | null>(null);
   const vet = useVet();
-  const results = search(ran, listings).filter((l) => !["banned", "suspended"].includes(vet[l.agentId]?.level ?? "") && (!l.saved || vet[l.agentId]?.status === "verified"));
-  const rank = (id: string) => (vet[id]?.level === "restricted" ? 1 : 0);
-  results.sort((x, y) => rank(x.agentId) - rank(y.agentId));
+  const results = rankListings(ran, listings, vet);
   if (chat) return <Chat session={session} listing={chat} back={() => setChat(null)} />;
   return (
     <div>
@@ -168,7 +167,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
       </form>
       <p className="mt-6 font-mono text-xs uppercase text-muted-foreground">{results.length} merchant agents matched</p>
       <div className="mt-3 grid gap-4 md:grid-cols-2">
-        {results.map((l, i) => {
+        {results.map(({ listing: l, score, parts }, i) => {
           const a = agentById(l.agentId);
           return (
             <article key={l.id} style={{ animationDelay: `${i * 60}ms` }} className="animate-rise border border-foreground bg-card p-5">
@@ -177,8 +176,14 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
                   <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">{l.kind} · {a.handle} <Badge id={a.id} /></span>
                   <h3 className="mt-1 text-xl font-semibold">{l.title}</h3>
                 </div>
-                <span className="font-mono text-lg font-semibold">{l.price}</span>
+                <div className="text-right">
+                  <span className="font-mono text-lg font-semibold">{l.price}</span>
+                  <p className="font-mono text-[10px] text-muted-foreground">#{i + 1} · score {score}</p>
+                </div>
               </div>
+              <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                {Object.entries(parts).map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(" · ")}
+              </p>
               <p className="mt-2 text-sm text-muted-foreground">{a.about}</p>
               {(() => { const c = verifyProduct(l.price, l.details ?? {}, vet[a.id]?.status === "verified"); const ok = c.filter((x) => x.ok).length; return (
                 <details className="mt-3"><summary className={`cursor-pointer font-mono text-xs ${ok === c.length ? "" : "text-destructive"}`}>product checks {ok}/{c.length}</summary><div className="mt-2"><Checks checks={c} /></div></details>
