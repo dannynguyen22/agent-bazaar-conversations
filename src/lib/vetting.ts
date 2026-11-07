@@ -28,7 +28,7 @@ export type VetRecord = {
   points: number;
   level: Level;
   log: string[];
-  identity?: AgentIdentity;
+  identity?: AgentIdentity | undefined;
 };
 
 /** Enforcement ladder: points needed to reach each level. */
@@ -185,7 +185,7 @@ export function submitKyb(key: string, k: Kyb, endpoint: string, name: string, o
 
 /* ------------------------------------------------- product verification */
 
-export type ProductDetails = { stock?: number; deliveryDays?: number; returns?: string; specs?: string; authentic?: boolean };
+export type ProductDetails = { stock?: number | undefined; deliveryDays?: number | undefined; returns?: string | undefined; specs?: string | undefined; authentic?: boolean | undefined };
 
 export function verifyProduct(price: string, d: ProductDetails, merchantVerified: boolean): Check[] {
   const p = euros(price)[0];
