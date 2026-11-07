@@ -5,6 +5,8 @@ export type Listing = {
   price: string;
   tags: string[];
   agentId: string;
+  /** True for listings saved by signed-in users (shown only once the merchant is verified). */
+  saved?: boolean;
 };
 
 export type Agent = {
