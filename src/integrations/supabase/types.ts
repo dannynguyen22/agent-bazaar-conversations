@@ -14,7 +14,96 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      conversations: {
+        Row: {
+          created_at: string
+          id: string
+          listing_title: string
+          merchant_handle: string
+          messages: Json
+          outcome: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          listing_title: string
+          merchant_handle: string
+          messages?: Json
+          outcome?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          listing_title?: string
+          merchant_handle?: string
+          messages?: Json
+          outcome?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      listings: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          price: string
+          tags: string[]
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: string
+          price?: string
+          tags?: string[]
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          price?: string
+          tags?: string[]
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          account_type: string
+          created_at: string
+          display_name: string
+          doc_name: string | null
+          id: string
+          licence: string | null
+          vet_status: string
+        }
+        Insert: {
+          account_type?: string
+          created_at?: string
+          display_name?: string
+          doc_name?: string | null
+          id: string
+          licence?: string | null
+          vet_status?: string
+        }
+        Update: {
+          account_type?: string
+          created_at?: string
+          display_name?: string
+          doc_name?: string | null
+          id?: string
+          licence?: string | null
+          vet_status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
