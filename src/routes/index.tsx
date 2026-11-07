@@ -62,7 +62,7 @@ function Login() {
     e.preventDefault(); setBusy(true); setMsg(null);
     if (mode === "up") {
       const { error } = await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin, data: { display_name: name || email.split("@")[0] } } });
-      setMsg(error ? error.message : "Check your email to confirm your account, then sign in.");
+      if (error) setMsg(error.message);
     } else if (mode === "in") {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
       if (error) setMsg(error.message);
