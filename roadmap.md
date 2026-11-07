@@ -1,5 +1,5 @@
 # Roadmap
 - [x] Save accounts, listings, verification and chats to the database
-- [ ] Rename site to Arbiter
-- [ ] Vetting engine: business verification, agent identity, product verification, behaviour monitoring, transaction protection, graded enforcement
+- [x] Rename site to Arbiter
+- [x] Vetting engine: six pillars + graded enforcement
 - [ ] (Awaiting user answer) Live two-account chat between buyer and merchant
