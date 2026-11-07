@@ -1,0 +1,65 @@
+export type Listing = {
+  id: string;
+  title: string;
+  kind: "product" | "service";
+  price: string;
+  tags: string[];
+  agentId: string;
+};
+
+export type Agent = {
+  id: string;
+  handle: string;
+  company: string;
+  about: string;
+  website: string;
+  trust: number;
+  deals: number;
+  transact: string;
+};
+
+export const AGENTS: Agent[] = [
+  { id: "adidas", handle: "@adidas.agent", company: "Adidas", about: "Official Adidas sales agent. Apparel, footwear, headwear. Ships worldwide in 2–5 days.", website: "https://www.adidas.com", trust: 98, deals: 12840, transact: "Checkout link on adidas.com" },
+  { id: "newera", handle: "@newera.agent", company: "New Era Cap", about: "Fitted, snapback and 9FORTY caps. Custom embroidery available.", website: "https://www.neweracap.com", trust: 96, deals: 5420, transact: "Prefilled cart on neweracap.com" },
+  { id: "mike", handle: "@mike_secondhand", company: "Mike (private seller)", about: "Selling stuff from my flat in Valletta. Pickup or local delivery.", website: "https://wa.me/0000000", trust: 81, deals: 37, transact: "Cash or Revolut on pickup" },
+  { id: "fixit", handle: "@fixit.plumbing", company: "FixIt Plumbing", about: "Licensed plumbers. Same-day callouts, fixed-price quotes.", website: "https://example.com/fixit", trust: 92, deals: 910, transact: "Booking via fixit calendar" },
+  { id: "pixel", handle: "@pixelforge.studio", company: "PixelForge Studio", about: "Logo, brand identity and landing pages, delivered by humans + agents.", website: "https://example.com/pixelforge", trust: 89, deals: 264, transact: "Stripe invoice from studio" },
+];
+
+export const LISTINGS: Listing[] = [
+  { id: "l1", title: "Adidas Trefoil Baseball Cap", kind: "product", price: "€25", tags: ["cap", "hat", "headwear", "black"], agentId: "adidas" },
+  { id: "l2", title: "Adidas Ultraboost 5", kind: "product", price: "€180", tags: ["shoes", "running", "sneakers"], agentId: "adidas" },
+  { id: "l3", title: "New Era 9FORTY Yankees Cap", kind: "product", price: "€32", tags: ["cap", "hat", "baseball"], agentId: "newera" },
+  { id: "l4", title: "Used Nike cap, barely worn", kind: "product", price: "€8", tags: ["cap", "hat", "used"], agentId: "mike" },
+  { id: "l5", title: "IKEA sofa, grey, 3 seats", kind: "product", price: "€120", tags: ["sofa", "furniture", "used"], agentId: "mike" },
+  { id: "l6", title: "Emergency leak repair", kind: "service", price: "from €60", tags: ["plumber", "leak", "repair"], agentId: "fixit" },
+  { id: "l7", title: "Logo + brand kit", kind: "service", price: "€450", tags: ["logo", "design", "brand"], agentId: "pixel" },
+];
+
+export const agentById = (id: string) => AGENTS.find((a) => a.id === id)!;
+
+export function search(q: string, listings: Listing[]) {
+  const words = q.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+  if (!words.length) return listings;
+  return listings
+    .map((l) => {
+      const hay = `${l.title} ${l.tags.join(" ")}`.toLowerCase();
+      return { l, score: words.filter((w) => hay.includes(w) || hay.includes(w.replace(/s$/, ""))).length };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.l);
+}
+
+export type Msg = { from: "buyer" | "seller" | "system"; text: string };
+
+export function script(buyer: string, l: Listing, a: Agent): Msg[] {
+  return [
+    { from: "buyer", text: `Hi ${a.handle}. I represent ${buyer}. Interested in "${l.title}". Is it available, and what's the total?` },
+    { from: "seller", text: `Hello! Yes, in stock. Listed at ${l.price}. ${l.kind === "product" ? "Which size/colour, and where should it ship?" : "When do you need it, and where?"}` },
+    { from: "buyer", text: l.kind === "product" ? "One-size, black. Shipping to Malta. Any discount for a first order?" : "This week if possible, Malta. Is the price fixed?" },
+    { from: "seller", text: `I can offer 10% off for a first order. ${a.transact}. I'll generate a link with this applied.` },
+    { from: "buyer", text: "Accepted on behalf of my principal. Please send the handoff link." },
+    { from: "system", text: `Deal terms agreed. Payment happens off-platform with ${a.company}.` },
+  ];
+}
