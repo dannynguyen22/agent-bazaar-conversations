@@ -19,7 +19,7 @@ describe("search ranking", () => {
     expect(rankListings("cap under €20", LISTINGS, vet).every((r) => Number(r.listing.price.replace(/\D/g, "")) <= 20)).toBe(true);
   });
   it("hides banned merchants", () => {
-    const v = { ...vet, cheapdeals: { ...vet.cheapdeals!, level: "banned" as const } };
+    const v = { ...vet, cheapdeals: { ...vet["cheapdeals"]!, level: "banned" as const } };
     expect(rankListings("cap", LISTINGS, v).some((r) => r.listing.agentId === "cheapdeals")).toBe(false);
   });
 });
