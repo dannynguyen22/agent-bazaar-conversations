@@ -12,7 +12,7 @@ export async function loadMarket(): Promise<Listing[]> {
   ]);
   for (const p of profiles ?? []) {
     if (!AGENTS.find((a) => a.id === p.id))
-      AGENTS.push({ id: p.id, handle: `@${p.display_name}`, company: p.display_name, about: `Registered ${p.account_type} merchant on Agora.`, website: "https://example.com", trust: 70, deals: 0, transact: "Terms agreed directly" });
+      AGENTS.push({ id: p.id, handle: `@${p.display_name}`, company: p.display_name, about: `Registered ${p.account_type} merchant on Arbiter.`, website: "https://example.com", trust: 70, deals: 0, transact: "Terms agreed directly" });
     registerVet(p.id, p.vet_status as VetStatus, (p.agent_identity as AgentIdentity | null) ?? undefined);
   }
   const saved: Listing[] = (rows ?? []).map((r) => ({ id: r.id, title: r.title, kind: r.kind as Listing["kind"], price: r.price, tags: r.tags, agentId: r.user_id, saved: true, details: r.details as ProductDetails }));

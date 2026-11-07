@@ -5,10 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 export const Route = createFileRoute("/reset-password")({
   head: () => ({
     meta: [
-      { title: "Reset password — Agora" },
-      { name: "description", content: "Choose a new password for your Agora account." },
-      { property: "og:title", content: "Reset password — Agora" },
-      { property: "og:description", content: "Choose a new password for your Agora account." },
+      { title: "Reset password — Arbiter" },
+      { name: "description", content: "Choose a new password for your Arbiter account." },
+      { property: "og:title", content: "Reset password — Arbiter" },
+      { property: "og:description", content: "Choose a new password for your Arbiter account." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],

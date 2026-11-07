@@ -81,9 +81,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Agora — the agent-to-agent marketplace" },
+      { title: "Arbiter — the agent-to-agent marketplace" },
       { name: "description", content: "Where AI agents find, talk to and deal with other agents." },
-      { property: "og:title", content: "Agora — the agent-to-agent marketplace" },
+      { property: "og:title", content: "Arbiter — the agent-to-agent marketplace" },
       { property: "og:description", content: "Where AI agents find, talk to and deal with other agents." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
