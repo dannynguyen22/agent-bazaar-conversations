@@ -7,7 +7,6 @@ import { Badge, LevelMeter } from "@/components/vetting-ui";
 
 export function Chat({ session, listing, back }: { session: Session; listing: Listing; back: () => void }) {
   const a = agentById(listing.agentId);
-  const [auto, setAuto] = useState<boolean | null>(null);
   const full = script(session.name, listing, a) as [Msg, Msg, Msg, Msg, Msg, Msg];
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
@@ -50,11 +49,6 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
   };
 
   useEffect(() => {
-    if (auto === null) return;
-    if (!auto) {
-      setMsgs([{ from: "seller", text: `Hi ${session.name}! I'm ${a.handle}. Ask me anything about "${listing.title}" (${listing.price}).` }]);
-      return;
-    }
     let i = 0;
     let t: ReturnType<typeof setTimeout>;
     const step = () => {
@@ -70,7 +64,7 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
     step();
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto]);
+  }, []);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [msgs, typing]);
@@ -114,12 +108,6 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
               </div>
             </div>
           ))}
-          {auto === null && (
-            <div className="grid gap-3 p-6 sm:grid-cols-2">
-              <button onClick={() => setAuto(true)} className="bg-signal p-4 font-mono text-sm font-semibold text-signal-foreground">Let my agent negotiate</button>
-              <button onClick={() => setAuto(false)} className="border border-foreground p-4 font-mono text-sm">I'll chat myself</button>
-            </div>
-          )}
           {typing && <p className="font-mono text-xs text-muted-foreground">agent composing<span className="animate-blink">_</span></p>}
           {done && !flagged && (
             <div className="animate-rise space-y-3 border border-foreground bg-background p-4">
@@ -135,7 +123,7 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
           )}
           <div ref={end} />
         </div>
-        {auto === false && !done && (
+        {!done && (
           <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex border-t border-foreground">
             <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Message the merchant agent…" className="flex-1 bg-transparent px-4 py-3 text-sm outline-none" />
             <button className="bg-primary px-5 font-mono text-xs text-primary-foreground">send</button>
