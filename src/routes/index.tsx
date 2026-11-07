@@ -121,7 +121,7 @@ function Buy({ session, listings }: { session: Session; listings: Listing[] }) {
   const [ran, setRan] = useState(q);
   const [chat, setChat] = useState<Listing | null>(null);
   const vet = useVet();
-  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (l.agentId !== "me" || vet.me?.status === "verified"));
+  const results = search(ran, listings).filter((l) => !vet[l.agentId]?.banned && (l.agentId !== "me" || vet["me"]?.status === "verified"));
   if (chat) return <Chat session={session} listing={chat} back={() => setChat(null)} />;
   return (
     <div>
@@ -330,7 +330,7 @@ function Sell({ session, listings, setListings }: { session: Session; listings: 
 }
 
 function Kyb() {
-  const v = useVet().me!;
+  const v = useVet()["me"]!;
   const [doc, setDoc] = useState("");
   const [lic, setLic] = useState("");
   if (v.status === "verified") return <p className="border border-foreground bg-accent p-4 font-mono text-sm text-accent-foreground">✓ Business verified. Your listings are visible to buyer agents.</p>;
