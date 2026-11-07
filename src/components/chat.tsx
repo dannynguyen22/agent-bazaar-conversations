@@ -3,7 +3,7 @@ import { agentById, script, type Listing, type Msg } from "@/lib/market-data";
 import { saveConversation } from "@/lib/market-db";
 import type { Session } from "@/lib/session";
 import { addViolation, getVet, scanMessage, useVet } from "@/lib/vetting";
-import { Badge, LevelMeter, TransactionPanel } from "@/components/vetting-ui";
+import { Badge, LevelMeter } from "@/components/vetting-ui";
 
 export function Chat({ session, listing, back }: { session: Session; listing: Listing; back: () => void }) {
   const a = agentById(listing.agentId);
@@ -17,14 +17,13 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
   const [flagged, setFlagged] = useState(false);
   const vet = useVet()[a.id];
   const saved = useRef(false);
-  const [receipt, setReceipt] = useState<string | null>(null);
   const persist = (outcome: string, all: Msg[]) => void saveConversation(session.id, listing.title, a.handle, outcome, all);
   useEffect(() => {
-    if (!done || saved.current || (!flagged && !receipt)) return;
+    if (!done || saved.current) return;
     saved.current = true;
-    persist(flagged ? `flagged · merchant ${getVet(a.id)?.level ?? ""}` : `agreed · receipt ${receipt}`, msgs);
+    persist(flagged ? `flagged · merchant ${getVet(a.id)?.level ?? ""}` : `agreed · handed off to ${a.website}`, msgs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [done, flagged, receipt]);
+  }, [done, flagged]);
 
   /** Behaviour monitor: scans a seller message, applies enforcement. Returns true if the channel was terminated. */
   const vetCheck = (text: string) => {
@@ -123,9 +122,16 @@ export function Chat({ session, listing, back }: { session: Session; listing: Li
           )}
           {typing && <p className="font-mono text-xs text-muted-foreground">agent composing<span className="animate-blink">_</span></p>}
           {done && !flagged && (
-            <TransactionPanel level={vet?.level ?? "good"} transact={a.transact} website={a.website} company={a.company}
-              onConfirm={(r) => setReceipt(r)}
-              onDispute={() => { addViolation(a.id, { category: "buyer report", severity: 1, evidence: "dispute opened after checkout" }); persist("dispute opened", msgs); }} />
+            <div className="animate-rise space-y-3 border border-foreground bg-background p-4">
+              <p className="font-mono text-xs uppercase text-muted-foreground">Handoff — deal made off-platform</p>
+              <p className="text-sm">
+                Terms agreed. Arbiter never takes payment or holds funds — you and {a.company} settle directly on their site.
+              </p>
+              <p className="font-mono text-xs text-muted-foreground">Transacts via: <span className="text-foreground">{a.transact}</span></p>
+              <a href={a.website} target="_blank" rel="noreferrer" className="block bg-signal p-4 text-center font-mono font-semibold text-signal-foreground">
+                Continue on {a.company} → {a.website.replace("https://", "")}
+              </a>
+            </div>
           )}
           <div ref={end} />
         </div>

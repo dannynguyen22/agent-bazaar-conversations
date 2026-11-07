@@ -6,7 +6,7 @@ import { AGENTS, LISTINGS, agentById, script, type Listing, type Msg } from "@/l
 import { supabase } from "@/integrations/supabase/client";
 import { addListing, deleteListing, loadConversations, loadMarket, saveConversation, saveVetStatus } from "@/lib/market-db";
 import { addViolation, getVet, scanMessage, useVet, verifyProduct } from "@/lib/vetting";
-import { Badge, Checks, IdentityCard, KybForm, LevelMeter, TransactionPanel, VettingPage } from "@/components/vetting-ui";
+import { Badge, Checks, IdentityCard, KybForm, LevelMeter, VettingPage } from "@/components/vetting-ui";
 
 export const Route = createFileRoute("/")({
   head: () => ({

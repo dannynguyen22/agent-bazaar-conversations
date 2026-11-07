@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AGENTS } from "@/lib/market-data";
 import {
-  BAN_AT, LADDER, TRUSTED_PROVIDERS, crossCheck, fraudScore, submitKyb, useVet,
+  BAN_AT, LADDER, crossCheck, submitKyb, useVet,
   type AgentIdentity, type Check, type Kyb, type VetStatus,
 } from "@/lib/vetting";
 
@@ -108,42 +108,6 @@ export function KybForm({ userId, name, onDone }: { userId: string; name: string
         <div className="mt-4"><Checks checks={checks ?? crossCheck(k)} /></div>
       )}
     </form>
-  );
-}
-
-export function TransactionPanel({ level, transact, website, company, onConfirm, onDispute }: {
-  level: Parameters<typeof fraudScore>[0]; transact: string; website: string; company: string;
-  onConfirm: (receipt: string) => void; onDispute: () => void;
-}) {
-  const [receipt, setReceipt] = useState<string | null>(null);
-  const [disputed, setDisputed] = useState(false);
-  const score = fraudScore(level, transact);
-  const trusted = TRUSTED_PROVIDERS.some((p) => transact.toLowerCase().includes(p.toLowerCase())) || /checkout|cart|link|invoice|booking/i.test(transact);
-  return (
-    <div className="animate-rise space-y-3 border border-foreground bg-background p-4">
-      <p className="font-mono text-xs uppercase text-muted-foreground">Transaction protection</p>
-      <Checks checks={[
-        { label: "Payment rail", ok: trusted, note: transact },
-        { label: "Fraud score", ok: score < 40, note: `${score}/100` },
-        { label: "Checkout confirmation", ok: !!receipt, note: receipt ? "confirmed by buyer" : "awaiting buyer" },
-        { label: "Dispute handling", ok: true, note: "available for 30 days" },
-      ]} />
-      {!receipt ? (
-        <button onClick={() => { const r = `RCPT-${Date.now().toString(36).toUpperCase()}`; setReceipt(r); onConfirm(r); }} className="w-full bg-primary py-3 font-mono text-sm font-semibold text-primary-foreground">
-          Confirm agreed terms & issue receipt
-        </button>
-      ) : (
-        <>
-          <p className="font-mono text-xs">Order receipt <b>{receipt}</b> saved.</p>
-          <a href={website} target="_blank" rel="noreferrer" className="block bg-signal p-4 text-center font-mono font-semibold text-signal-foreground">
-            Continue on {company} → {website.replace("https://", "")}
-          </a>
-          <button disabled={disputed} onClick={() => { setDisputed(true); onDispute(); }} className="w-full border border-destructive py-2 font-mono text-xs text-destructive disabled:opacity-50">
-            {disputed ? "Dispute opened — under review" : "Open a dispute"}
-          </button>
-        </>
-      )}
-    </div>
   );
 }
 
